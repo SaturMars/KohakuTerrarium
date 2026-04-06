@@ -145,18 +145,25 @@ class KohakuManager:
         session.agent.interrupt()
 
     def agent_get_jobs(self, agent_id: str) -> list[dict]:
-        """Get running/recent jobs for an agent."""
+        """Get running/recent jobs for an agent (tools + sub-agents)."""
         session = self._agents.get(agent_id)
         if not session:
             raise ValueError(f"Agent not found: {agent_id}")
-        return [j.to_dict() for j in session.agent.executor.get_running_jobs()]
+        jobs = [j.to_dict() for j in session.agent.executor.get_running_jobs()]
+        jobs.extend(
+            j.to_dict() for j in session.agent.subagent_manager.get_running_jobs()
+        )
+        return jobs
 
     async def agent_cancel_job(self, agent_id: str, job_id: str) -> bool:
-        """Cancel a running job. Returns True if cancelled."""
+        """Cancel a running job (tool or sub-agent). Returns True if cancelled."""
         session = self._agents.get(agent_id)
         if not session:
             raise ValueError(f"Agent not found: {agent_id}")
-        return session.agent.executor.cancel(job_id)
+        # Try executor (tools) first, then sub-agent manager
+        if session.agent.executor.cancel(job_id):
+            return True
+        return await session.agent.subagent_manager.cancel(job_id)
 
     def agent_switch_model(self, agent_id: str, profile_name: str) -> str:
         """Switch an agent's LLM model. Returns the new model name."""
@@ -523,7 +530,9 @@ class KohakuManager:
     ) -> str:
         """Switch a creature's LLM model. Returns the new model name."""
         runtime = self._get_runtime(terrarium_id)
-        agent = runtime.get_creature_agent(name)
+        agent = (
+            runtime.root_agent if name == "root" else runtime.get_creature_agent(name)
+        )
         if agent is None:
             raise ValueError(f"Creature not found: {name}")
         return agent.switch_model(profile_name)
@@ -531,28 +540,38 @@ class KohakuManager:
     async def creature_interrupt(self, terrarium_id: str, name: str) -> None:
         """Interrupt a creature's current turn."""
         runtime = self._get_runtime(terrarium_id)
-        agent = runtime.get_creature_agent(name)
+        agent = (
+            runtime.root_agent if name == "root" else runtime.get_creature_agent(name)
+        )
         if agent is None:
             raise ValueError(f"Creature not found: {name}")
-        await agent.interrupt()
+        agent.interrupt()
 
     def creature_get_jobs(self, terrarium_id: str, name: str) -> list[dict]:
-        """Get running jobs for a creature."""
+        """Get running jobs for a creature (tools + sub-agents)."""
         runtime = self._get_runtime(terrarium_id)
-        agent = runtime.get_creature_agent(name)
+        agent = (
+            runtime.root_agent if name == "root" else runtime.get_creature_agent(name)
+        )
         if agent is None:
             raise ValueError(f"Creature not found: {name}")
-        return [j.to_dict() for j in agent.executor.get_running_jobs()]
+        jobs = [j.to_dict() for j in agent.executor.get_running_jobs()]
+        jobs.extend(j.to_dict() for j in agent.subagent_manager.get_running_jobs())
+        return jobs
 
     async def creature_cancel_job(
         self, terrarium_id: str, name: str, job_id: str
     ) -> bool:
-        """Cancel a creature's running job."""
+        """Cancel a creature's running job (tool or sub-agent)."""
         runtime = self._get_runtime(terrarium_id)
-        agent = runtime.get_creature_agent(name)
+        agent = (
+            runtime.root_agent if name == "root" else runtime.get_creature_agent(name)
+        )
         if agent is None:
             raise ValueError(f"Creature not found: {name}")
-        return agent.executor.cancel(job_id)
+        if agent.executor.cancel(job_id):
+            return True
+        return await agent.subagent_manager.cancel(job_id)
 
     # =================================================================
     # Creature Channel Ops (private/sub-agent channels)

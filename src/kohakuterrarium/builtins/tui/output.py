@@ -60,7 +60,7 @@ class TUIOutput(BaseOutputModule):
             self._tui.end_streaming(target=self._target)
         logger.debug("TUI output stopped")
 
-    # ── Processing lifecycle ────────────────────────────────────
+    # -- Processing lifecycle -----------------------------------------------
 
     async def on_processing_start(self) -> None:
         self._turn_started = False
@@ -74,13 +74,13 @@ class TUIOutput(BaseOutputModule):
             self._tui.set_idle()
         self._turn_started = False
 
-    # ── User input ──────────────────────────────────────────────
+    # -- User input ---------------------------------------------------------
 
     async def on_user_input(self, text: str) -> None:
         # User message is already added by AgentTUI.on_input_submitted
         pass
 
-    # ── Text streaming ──────────────────────────────────────────
+    # -- Text streaming -----------------------------------------------------
 
     async def write(self, content: str) -> None:
         if self._tui and content:
@@ -105,7 +105,7 @@ class TUIOutput(BaseOutputModule):
             self._tui.begin_streaming(target=self._target)
             self._turn_started = True
 
-    # ── Activity rendering ──────────────────────────────────────
+    # -- Activity rendering -------------------------------------------------
 
     def on_activity(self, activity_type: str, detail: str) -> None:
         self._handle_activity(activity_type, detail, {})
@@ -127,130 +127,174 @@ class TUIOutput(BaseOutputModule):
         t = self._target  # target tab for this output
 
         match activity_type:
-            # ── Tool lifecycle (single Collapsible, updated in-place) ──
-
             case "tool_start":
-                self._tui.end_streaming(target=self._target)
-                self._turn_started = False
-                args_preview = _format_args_preview(name, args) or rest[:60]
-                self._tui.add_tool_block(name, args_preview, job_id, target=t)
-                if metadata.get("background"):
-                    self._tui.update_running(job_id or name, name)
-
+                self._handle_tool_start(name, rest, args, job_id, t, metadata)
             case "tool_done":
-                output = metadata.get("output", rest)
-                self._tui.update_tool_block(
-                    name, output=output, tool_id=job_id, target=t
-                )
-                self._tui.update_running(job_id or name, name, remove=True)
-
+                self._handle_tool_done(name, rest, job_id, t, metadata)
             case "tool_error":
-                self._tui.update_tool_block(name, error=rest, tool_id=job_id, target=t)
-                self._tui.update_running(job_id or name, name, remove=True)
-
-            # ── Sub-agent lifecycle ──────────────────────────────
-
+                self._handle_tool_error(name, rest, job_id, t)
             case "subagent_start":
-                self._tui.end_streaming(target=self._target)
-                self._turn_started = False
-                task = metadata.get("task", rest)
-                self._tui.add_subagent_block(name, task, job_id, target=t)
-                self._tui.update_running(job_id or name, f"[sub] {name}")
-
+                self._handle_subagent_start(name, rest, job_id, t, metadata)
             case "subagent_done":
-                self._tui.end_subagent_block(
-                    output=metadata.get("result", rest),
-                    tools_used=metadata.get("tools_used"),
-                    turns=metadata.get("turns", 0),
-                    duration=metadata.get("duration", 0),
-                    target=t,
-                )
-                self._tui.update_running(job_id or name, name, remove=True)
-
+                self._handle_subagent_done(name, rest, job_id, t, metadata)
             case "subagent_error":
-                self._tui.end_subagent_block(error=rest, target=t)
-                self._tui.update_running(job_id or name, name, remove=True)
-
-            # ── Sub-agent internal tools (nested) ───────────────
-
+                self._handle_subagent_error(name, rest, job_id, t)
             case s if s.startswith("subagent_tool_"):
-                tool_name = metadata.get("tool", "")
-                sub_activity = s.replace("subagent_", "")
-                sub_detail = metadata.get("detail", rest)
-
-                if sub_activity == "tool_start":
-                    sub_args = (
-                        _format_args_preview(tool_name, metadata.get("args", {}))
-                        or sub_detail[:60]
-                    )
-                    self._tui.add_tool_block(tool_name, sub_args, target=t)
-                elif sub_activity == "tool_done":
-                    self._tui.update_tool_block(tool_name, output=sub_detail, target=t)
-                elif sub_activity == "tool_error":
-                    self._tui.update_tool_block(tool_name, error=sub_detail, target=t)
-
-            # ── Trigger fired ───────────────────────────────────
-
+                self._handle_subagent_tool(s, name, rest, t, metadata)
             case "trigger_fired":
-                self._tui.end_streaming(target=self._target)
-                self._turn_started = False
-                channel = metadata.get("channel", "")
-                sender = metadata.get("sender", "")
-                content = metadata.get("content", "")
-                label = f"[{channel}] {sender}" if channel else name
-                self._tui.add_trigger_message(label, content, target=t)
-
-            # ── Token usage ─────────────────────────────��───────
-
+                self._handle_trigger_fired(name, t, metadata)
             case "token_usage":
-                prompt = metadata.get("prompt_tokens", 0)
-                completion = metadata.get("completion_tokens", 0)
-                total = metadata.get("total_tokens", 0)
-                cached = metadata.get("cached_tokens", 0)
-                self._tui.update_token_usage(prompt, completion, total, cached)
-
-            # ── Compact lifecycle ──────────────────────────────
-
-            case "compact_start":
-                self._tui.end_streaming(target=t)
-                self._turn_started = False
-                round_num = metadata.get("round", 0)
-                self._tui.add_compact_summary(round_num, "(compacting...)", target=t)
-                self._tui.update_running("compact", "compacting context")
-
-            case "compact_complete":
-                round_num = metadata.get("round", 0)
-                summary = metadata.get("summary", "")
-                self._tui.update_compact_summary(round_num, summary, target=t)
-                self._tui.update_running("compact", "", remove=True)
-
-            # ── Session info ───────────────────────────────────────
-
+                self._handle_token_usage(metadata)
+            case "compact_start" | "compact_complete":
+                self._handle_compact_activity(activity_type, t, metadata)
             case "session_info":
-                session_id = metadata.get("session_id", "")
-                model = metadata.get("model", "")
-                agent_name = metadata.get("agent_name", "")
-                compact_threshold = metadata.get("compact_threshold", 0)
-                self._tui.update_session_info(session_id, model, agent_name)
-                if compact_threshold:
-                    self._tui.set_compact_threshold(compact_threshold)
-
-            # ── Interrupt ───────────────────────────────────────
-
+                self._handle_session_info(metadata)
+            case "job_cancelled":
+                self._handle_job_cancelled(t, metadata)
             case "interrupt":
                 self._tui.end_streaming(target=self._target)
-                self._tui.interrupt_subagent(target=t)
-                self._tui.clear_running()
+                # Only end streaming — do NOT clear running panel or
+                # interrupt sub-agents. Background jobs have their own
+                # lifecycle and are cancelled individually.
                 self._turn_started = False
-
             case "processing_complete":
-                # Processing cycle fully done, clean up running panel
-                self._tui.clear_running()
-
+                # Don't clear running panel — background jobs may still be
+                # running. They remove themselves individually when done.
+                pass
             case _:
                 pass
 
-    # ── Resume history ──────────────────────────────────────────
+    # -- Activity handler methods -------------------------------------------
+
+    def _handle_tool_start(
+        self, name: str, rest: str, args: dict, job_id: str, t: str, metadata: dict
+    ) -> None:
+        self._tui.end_streaming(target=self._target)
+        self._turn_started = False
+        args_preview = _format_args_preview(name, args) or rest[:60]
+        self._tui.add_tool_block(name, args_preview, job_id, target=t)
+        if metadata.get("background"):
+            self._tui.update_running(job_id or name, name)
+
+    def _handle_tool_done(
+        self, name: str, rest: str, job_id: str, t: str, metadata: dict
+    ) -> None:
+        output = metadata.get("output", rest)
+        self._tui.update_tool_block(name, output=output, tool_id=job_id, target=t)
+        self._tui.update_running(job_id or name, name, remove=True)
+
+    def _handle_tool_error(self, name: str, rest: str, job_id: str, t: str) -> None:
+        self._tui.update_tool_block(name, error=rest, tool_id=job_id, target=t)
+        self._tui.update_running(job_id or name, name, remove=True)
+
+    def _handle_subagent_start(
+        self, name: str, rest: str, job_id: str, t: str, metadata: dict
+    ) -> None:
+        self._tui.end_streaming(target=self._target)
+        self._turn_started = False
+        task = metadata.get("task", rest)
+        self._tui.add_subagent_block(name, task, job_id, target=t)
+        self._tui.update_running(job_id or name, f"[sub] {name}")
+
+    def _handle_subagent_done(
+        self, name: str, rest: str, job_id: str, t: str, metadata: dict
+    ) -> None:
+        self._tui.end_subagent_block(
+            output=metadata.get("result", rest),
+            tools_used=metadata.get("tools_used"),
+            turns=metadata.get("turns", 0),
+            duration=metadata.get("duration", 0),
+            target=t,
+            agent_id=job_id,
+        )
+        self._tui.update_running(job_id or name, name, remove=True)
+
+    def _handle_subagent_error(self, name: str, rest: str, job_id: str, t: str) -> None:
+        self._tui.end_subagent_block(error=rest, target=t, agent_id=job_id)
+        self._tui.update_running(job_id or name, name, remove=True)
+
+    def _handle_job_cancelled(self, t: str, metadata: dict) -> None:
+        """Remove the cancelled job from the running panel and mark its widget."""
+        job_id = metadata.get("job_id", "")
+        job_name = metadata.get("job_name", "")
+        if job_id:
+            self._tui.update_running(job_id, job_name, remove=True)
+        # Also mark any tool or sub-agent block as cancelled
+        self._tui.update_tool_block(
+            job_name, error="cancelled by user", tool_id=job_id, target=t
+        )
+        self._tui.end_subagent_block(
+            error="cancelled by user", target=t, agent_id=job_id
+        )
+        self._tui.add_system_notice(
+            f"Cancelled: {job_name}", command="cancel", target=t
+        )
+
+    def _handle_subagent_tool(
+        self, activity_type: str, name: str, rest: str, t: str, metadata: dict
+    ) -> None:
+        tool_name = metadata.get("tool", "")
+        sa_job_id = metadata.get("job_id", "")
+        sub_activity = activity_type.replace("subagent_", "")
+        sub_detail = metadata.get("detail", rest)
+
+        if sub_activity == "tool_start":
+            sub_args = (
+                _format_args_preview(tool_name, metadata.get("args", {}))
+                or sub_detail[:60]
+            )
+            self._tui.add_tool_block(tool_name, sub_args, target=t, agent_id=sa_job_id)
+        elif sub_activity == "tool_done":
+            self._tui.update_tool_block(
+                tool_name, output=sub_detail, target=t, agent_id=sa_job_id
+            )
+        elif sub_activity == "tool_error":
+            self._tui.update_tool_block(
+                tool_name, error=sub_detail, target=t, agent_id=sa_job_id
+            )
+
+    def _handle_trigger_fired(self, name: str, t: str, metadata: dict) -> None:
+        self._tui.end_streaming(target=self._target)
+        self._turn_started = False
+        channel = metadata.get("channel", "")
+        sender = metadata.get("sender", "")
+        content = metadata.get("content", "")
+        label = f"[{channel}] {sender}" if channel else name
+        self._tui.add_trigger_message(label, content, target=t)
+
+    def _handle_token_usage(self, metadata: dict) -> None:
+        prompt = metadata.get("prompt_tokens", 0)
+        completion = metadata.get("completion_tokens", 0)
+        total = metadata.get("total_tokens", 0)
+        cached = metadata.get("cached_tokens", 0)
+        self._tui.update_token_usage(prompt, completion, total, cached)
+
+    def _handle_compact_activity(
+        self, activity_type: str, t: str, metadata: dict
+    ) -> None:
+        if activity_type == "compact_start":
+            self._tui.end_streaming(target=t)
+            self._turn_started = False
+            round_num = metadata.get("round", 0)
+            self._tui.add_compact_summary(round_num, "(compacting...)", target=t)
+            self._tui.update_running("compact", "compacting context")
+        else:  # compact_complete
+            round_num = metadata.get("round", 0)
+            summary = metadata.get("summary", "")
+            self._tui.update_compact_summary(round_num, summary, target=t)
+            self._tui.update_running("compact", "", remove=True)
+
+    def _handle_session_info(self, metadata: dict) -> None:
+        session_id = metadata.get("session_id", "")
+        model = metadata.get("model", "")
+        agent_name = metadata.get("agent_name", "")
+        max_context = metadata.get("max_context", 0)
+        compact_threshold = metadata.get("compact_threshold", 0)
+        self._tui.update_session_info(session_id, model, agent_name)
+        if max_context:
+            self._tui.set_context_limits(max_context, compact_threshold)
+
+    # -- Resume history -----------------------------------------------------
 
     async def on_resume(self, events: list[dict]) -> None:
         """Render session history as proper widgets.
@@ -320,7 +364,7 @@ class TUIOutput(BaseOutputModule):
             await asyncio.wait_for(done_event.wait(), timeout=10.0)
 
 
-# ── Helpers ─────────────────────────────────────────────────────
+# -- Helpers ---------------------------------------------------------------
 
 
 def _parse_detail(detail: str) -> tuple[str, str]:
@@ -370,7 +414,7 @@ def _format_args_preview(tool_name: str, args: dict) -> str:
             return ""
 
 
-# ── Resume rendering ────────────────────────────────────────────
+# -- Resume rendering ------------------------------------------------------
 
 
 def _group_into_turns(events: list[dict]) -> list[dict]:
@@ -442,130 +486,16 @@ def _iter_all_steps(turns: list[dict]):
 
 def _build_resume_widgets(turns: list[dict]) -> list:
     """Build all resume widgets synchronously (no mounting, no deferral)."""
-    widgets = []
+    widgets: list = []
     current_subagent: SubAgentBlock | None = None
     pending_tools: dict[str, str] = {}
     sa_pending_tools: dict[str, str] = {}  # sub-agent internal tools still "running"
 
     for turn in turns:
-        # User/trigger message
-        if turn["input_type"] == "user_input":
-            widgets.append(UserMessage(turn["input"]))
-        else:
-            widgets.append(
-                TriggerMessage(turn["input"], turn.get("trigger_content", ""))
-            )
-
-        for step_type, data in turn.get("steps", []):
-            if step_type == "text":
-                text = data if isinstance(data, str) else str(data)
-                if text.strip():
-                    # Use Textual Markdown widget (selectable text)
-                    widgets.append(Markdown(text))
-
-            elif step_type == "tool_call":
-                raw_name = data.get("name", "tool")
-                name = _clean_name(raw_name)
-                call_id = data.get("call_id", "")
-                args = data.get("args", {})
-                preview = _format_args_preview(name, args)
-
-                if current_subagent:
-                    current_subagent.add_tool_line(name, preview)
-                else:
-                    block = ToolBlock(name, preview, call_id)
-                    widgets.append(block)
-                if call_id:
-                    pending_tools[call_id] = name
-
-            elif step_type == "tool_result":
-                call_id = data.get("call_id", "")
-                name = pending_tools.pop(call_id, _clean_name(data.get("name", "tool")))
-                error = data.get("error")
-                output = data.get("output", "")
-                if output.strip() in ("OK", ""):
-                    output = ""
-
-                if current_subagent:
-                    current_subagent.update_tool_line(
-                        name, done=not error, error=bool(error)
-                    )
-                else:
-                    # Find the matching ToolBlock in widgets.
-                    # Try call_id match first, then fall back to name match.
-                    matched = None
-                    for w in reversed(widgets):
-                        if not isinstance(w, ToolBlock):
-                            continue
-                        if call_id and w.tool_id == call_id:
-                            matched = w
-                            break
-                    if matched is None:
-                        # Fallback: match by name among still-running tools
-                        for w in reversed(widgets):
-                            if (
-                                isinstance(w, ToolBlock)
-                                and w.tool_name == name
-                                and w.state == "running"
-                            ):
-                                matched = w
-                                break
-                    if matched is not None:
-                        if error:
-                            matched.mark_error(str(error))
-                        else:
-                            matched.mark_done(output)
-
-            elif step_type == "subagent_call":
-                # Finalize any leftover sub-agent tools from previous sub-agent
-                if current_subagent:
-                    for tn in list(sa_pending_tools):
-                        current_subagent.update_tool_line(tn, done=True)
-                    sa_pending_tools.clear()
-                raw_name = data.get("name", "subagent")
-                name = _clean_name(raw_name)
-                task = data.get("task", "")
-                block = SubAgentBlock(name, sa_task=task)
-                current_subagent = block
-                widgets.append(block)
-
-            elif step_type == "subagent_result":
-                # Mark any remaining sub-agent tools as done
-                if current_subagent:
-                    for tn in list(sa_pending_tools):
-                        current_subagent.update_tool_line(tn, done=True)
-                    sa_pending_tools.clear()
-                if current_subagent:
-                    current_subagent.mark_done(
-                        output=data.get("output", ""),
-                        tools_used=data.get("tools_used"),
-                        turns=data.get("turns", 0),
-                        duration=data.get("duration", 0),
-                    )
-                    current_subagent = None
-
-            elif step_type == "subagent_tool":
-                tool_name = data.get("tool_name", "")
-                activity = data.get("activity", "")
-                detail = data.get("detail", "")
-                if current_subagent:
-                    if activity == "tool_start":
-                        # Build the line with its final state directly
-                        # (don't add then update, since we're pre-mount)
-                        sa_pending_tools[tool_name] = detail[:50]
-                        current_subagent.add_tool_line(tool_name, detail[:50])
-                    elif activity == "tool_done":
-                        sa_pending_tools.pop(tool_name, None)
-                        current_subagent.update_tool_line(tool_name, done=True)
-                    elif activity == "tool_error":
-                        sa_pending_tools.pop(tool_name, None)
-                        current_subagent.update_tool_line(
-                            tool_name, done=False, error=True
-                        )
-
-            elif step_type == "compact_complete":
-                summary = data.get("summary", "") if isinstance(data, dict) else ""
-                widgets.append(CompactSummaryBlock(summary, done=True))
+        turn_ws, current_subagent, sa_pending_tools = _build_turn_widgets(
+            turn, current_subagent, pending_tools, sa_pending_tools
+        )
+        widgets.extend(turn_ws)
 
     # Mark interrupted sub-agents
     if current_subagent:
@@ -578,6 +508,137 @@ def _build_resume_widgets(turns: list[dict]) -> list:
             w.mark_done("")
 
     return widgets
+
+
+def _build_turn_widgets(
+    turn: dict,
+    current_subagent: SubAgentBlock | None,
+    pending_tools: dict[str, str],
+    sa_pending_tools: dict[str, str],
+) -> tuple[list, SubAgentBlock | None, dict[str, str]]:
+    """Build widgets for a single turn.
+
+    Returns (widgets, current_subagent, sa_pending_tools) so the caller
+    can carry sub-agent state across turns.
+    """
+    widgets: list = []
+
+    # User/trigger message
+    if turn["input_type"] == "user_input":
+        widgets.append(UserMessage(turn["input"]))
+    else:
+        widgets.append(TriggerMessage(turn["input"], turn.get("trigger_content", "")))
+
+    for step_type, data in turn.get("steps", []):
+        if step_type == "text":
+            text = data if isinstance(data, str) else str(data)
+            if text.strip():
+                # Use Textual Markdown widget (selectable text)
+                widgets.append(Markdown(text))
+
+        elif step_type == "tool_call":
+            raw_name = data.get("name", "tool")
+            name = _clean_name(raw_name)
+            call_id = data.get("call_id", "")
+            args = data.get("args", {})
+            preview = _format_args_preview(name, args)
+
+            if current_subagent:
+                current_subagent.add_tool_line(name, preview)
+            else:
+                block = ToolBlock(name, preview, call_id)
+                widgets.append(block)
+            if call_id:
+                pending_tools[call_id] = name
+
+        elif step_type == "tool_result":
+            call_id = data.get("call_id", "")
+            name = pending_tools.pop(call_id, _clean_name(data.get("name", "tool")))
+            error = data.get("error")
+            output = data.get("output", "")
+            if output.strip() in ("OK", ""):
+                output = ""
+
+            if current_subagent:
+                current_subagent.update_tool_line(
+                    name, done=not error, error=bool(error)
+                )
+            else:
+                # Find the matching ToolBlock in widgets.
+                # Try call_id match first, then fall back to name match.
+                matched = None
+                for w in reversed(widgets):
+                    if not isinstance(w, ToolBlock):
+                        continue
+                    if call_id and w.tool_id == call_id:
+                        matched = w
+                        break
+                if matched is None:
+                    # Fallback: match by name among still-running tools
+                    for w in reversed(widgets):
+                        if (
+                            isinstance(w, ToolBlock)
+                            and w.tool_name == name
+                            and w.state == "running"
+                        ):
+                            matched = w
+                            break
+                if matched is not None:
+                    if error:
+                        matched.mark_error(str(error))
+                    else:
+                        matched.mark_done(output)
+
+        elif step_type == "subagent_call":
+            # Finalize any leftover sub-agent tools from previous sub-agent
+            if current_subagent:
+                for tn in list(sa_pending_tools):
+                    current_subagent.update_tool_line(tn, done=True)
+                sa_pending_tools.clear()
+            raw_name = data.get("name", "subagent")
+            name = _clean_name(raw_name)
+            task = data.get("task", "")
+            block = SubAgentBlock(name, sa_task=task)
+            current_subagent = block
+            widgets.append(block)
+
+        elif step_type == "subagent_result":
+            # Mark any remaining sub-agent tools as done
+            if current_subagent:
+                for tn in list(sa_pending_tools):
+                    current_subagent.update_tool_line(tn, done=True)
+                sa_pending_tools.clear()
+            if current_subagent:
+                current_subagent.mark_done(
+                    output=data.get("output", ""),
+                    tools_used=data.get("tools_used"),
+                    turns=data.get("turns", 0),
+                    duration=data.get("duration", 0),
+                )
+                current_subagent = None
+
+        elif step_type == "subagent_tool":
+            tool_name = data.get("tool_name", "")
+            activity = data.get("activity", "")
+            detail = data.get("detail", "")
+            if current_subagent:
+                if activity == "tool_start":
+                    # Build the line with its final state directly
+                    # (don't add then update, since we're pre-mount)
+                    sa_pending_tools[tool_name] = detail[:50]
+                    current_subagent.add_tool_line(tool_name, detail[:50])
+                elif activity == "tool_done":
+                    sa_pending_tools.pop(tool_name, None)
+                    current_subagent.update_tool_line(tool_name, done=True)
+                elif activity == "tool_error":
+                    sa_pending_tools.pop(tool_name, None)
+                    current_subagent.update_tool_line(tool_name, done=False, error=True)
+
+        elif step_type == "compact_complete":
+            summary = data.get("summary", "") if isinstance(data, dict) else ""
+            widgets.append(CompactSummaryBlock(summary, done=True))
+
+    return widgets, current_subagent, sa_pending_tools
 
 
 def _clean_name(raw: str) -> str:
