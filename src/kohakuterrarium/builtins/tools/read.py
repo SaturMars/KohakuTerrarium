@@ -60,6 +60,11 @@ class ReadTool(BaseTool):
         if _is_image_file(file_path):
             return await self._read_image(file_path, path)
 
+        # PDF files: return text + rendered page images
+        if file_path.suffix.lower() == ".pdf":
+            pages = args.get("pages", None)
+            return await self._read_pdf(file_path, path, pages)
+
         # Binary file guard (non-image binaries)
         if is_binary_file(file_path):
             return ToolResult(
@@ -161,7 +166,7 @@ Read file contents with optional line range.
 
 - **Text files**: source code, config, markdown, etc. (returned with line numbers)
 - **Images**: png, jpg, gif, webp, svg, bmp, tiff, heif, avif (returned as visual input)
-- **PDFs**: returned as text content + page images (coming soon)
+- **PDFs**: returned as extracted text + rendered page images (requires pymupdf)
 - **Binary files**: other binary formats are rejected with a helpful message
 
 ## SAFETY
@@ -179,6 +184,7 @@ Read file contents with optional line range.
 | path | string | Path to file (required) |
 | offset | integer | Line to start from (0-based, default: 0, text files only) |
 | limit | integer | Max lines to read (default: all, text files only) |
+| pages | string | Page range for PDFs: "1-5", "3", "10-20" (default: all, max 20) |
 
 ## Behavior
 
@@ -186,7 +192,10 @@ Read file contents with optional line range.
   Use offset/limit for specific ranges.
 - **Images**: returns the image for visual inspection. The model can see
   and describe the image content.
-- **PDFs**: returns extracted text + rendered page images (coming soon).
+- **PDFs**: returns extracted text per page + rendered page images.
+  For large PDFs, you MUST specify a page range (max 20 pages per read).
+  Text is extracted with positional sorting. Page images are rendered
+  at 150 DPI for visual inspection by multimodal models.
 
 ## TIPS
 
@@ -195,7 +204,116 @@ Read file contents with optional line range.
   examine context.
 - For large files, read in chunks with offset/limit.
 - For images, just `read(path="screenshot.png")` to see the content.
+- For PDFs, use `read(path="doc.pdf", pages="1-5")` to read specific pages.
 """
+
+    async def _read_pdf(
+        self, file_path: Path, original_path: str, pages: str | None
+    ) -> ToolResult:
+        """Read a PDF file: extract text + render page images."""
+        try:
+            import fitz  # pymupdf
+        except ImportError:
+            return ToolResult(
+                error="PDF reading requires pymupdf. Install with: pip install pymupdf"
+            )
+
+        if not file_path.exists():
+            return ToolResult(error=f"File not found: {original_path}")
+
+        try:
+            doc = fitz.open(file_path)
+        except Exception as e:
+            return ToolResult(error=f"Failed to open PDF: {e}")
+
+        total_pages = len(doc)
+        if total_pages == 0:
+            doc.close()
+            return ToolResult(output="Empty PDF (0 pages).", exit_code=0)
+
+        # Parse page range
+        start, end = 0, total_pages
+        if pages:
+            start, end = _parse_page_range(pages, total_pages)
+
+        # Cap at 20 pages per read
+        max_pages = 20
+        if end - start > max_pages:
+            doc.close()
+            return ToolResult(
+                error=f"Too many pages ({end - start}). Max {max_pages} per read. "
+                f"Total pages: {total_pages}. Use pages= to specify a range, "
+                f'e.g. pages="1-{max_pages}".'
+            )
+
+        # Extract text + render pages
+        parts: list[TextPart | ImagePart] = []
+        text_sections: list[str] = []
+
+        zoom = 150 / 72  # 150 DPI
+        mat = fitz.Matrix(zoom, zoom)
+
+        for page_num in range(start, end):
+            page = doc[page_num]
+
+            # Extract text with block sorting
+            blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)[
+                "blocks"
+            ]
+            blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))
+
+            page_lines = [f"\n--- Page {page_num + 1}/{total_pages} ---\n"]
+            for block in blocks:
+                if block["type"] == 0:  # Text block
+                    for line in block.get("lines", []):
+                        text_parts = []
+                        for span in line.get("spans", []):
+                            text = span.get("text", "")
+                            if text.strip():
+                                text_parts.append(text)
+                        if text_parts:
+                            page_lines.append("".join(text_parts))
+            text_sections.extend(page_lines)
+
+            # Render page image
+            try:
+                pix = page.get_pixmap(matrix=mat)
+                img_data = pix.tobytes("png")
+                b64 = base64.b64encode(img_data).decode("ascii")
+                parts.append(
+                    ImagePart(
+                        url=f"data:image/png;base64,{b64}",
+                        detail="auto",
+                        source_type="pdf_page",
+                        source_name=f"{file_path.name} p{page_num + 1}",
+                    )
+                )
+            except Exception:
+                pass  # Skip render on failure, text is still available
+
+        doc.close()
+
+        # Combine text + images
+        text_content = "\n".join(text_sections)
+        if not text_content.strip():
+            text_content = "(No extractable text — check the page images below.)"
+
+        header = f"PDF: {original_path} ({total_pages} pages"
+        if pages:
+            header += f", showing pages {start + 1}-{end}"
+        header += ")\n"
+
+        parts.insert(0, TextPart(text=header + text_content))
+
+        logger.info(
+            "PDF read",
+            file_path=str(file_path),
+            pages=f"{start + 1}-{end}",
+            total=total_pages,
+            rendered=len(parts) - 1,
+        )
+
+        return ToolResult(output=parts, exit_code=0)
 
     async def _read_image(self, file_path: Path, original_path: str) -> ToolResult:
         """Read an image file and return as multimodal content."""
@@ -282,3 +400,20 @@ _IMAGE_MIME = {
 def _is_image_file(path: Path) -> bool:
     """Check if a file is a supported image format."""
     return path.suffix.lower() in _IMAGE_EXTENSIONS
+
+
+def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
+    """Parse page range string. Returns (start, end) as 0-based indices.
+
+    Supports: "3" (single page), "1-5" (range), "10-20" (range).
+    Page numbers are 1-based in input, returned as 0-based.
+    """
+    pages = pages.strip()
+    if "-" in pages:
+        parts = pages.split("-", 1)
+        start = max(0, int(parts[0]) - 1)
+        end = min(total, int(parts[1]))
+    else:
+        start = max(0, int(pages) - 1)
+        end = min(total, start + 1)
+    return start, end
