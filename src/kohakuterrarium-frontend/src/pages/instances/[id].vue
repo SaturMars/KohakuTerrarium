@@ -14,6 +14,14 @@
         instance.pwd
       }}</span>
       <div class="flex-1" />
+      <el-tooltip content="Open in Editor" placement="bottom">
+        <button
+          class="nav-item !w-7 !h-7 text-iolite hover:!text-iolite-shadow"
+          @click="router.push(`/editor/${route.params.id}`)"
+        >
+          <div class="i-carbon-code text-sm" />
+        </button>
+      </el-tooltip>
       <el-tooltip content="Stop instance" placement="bottom">
         <button
           class="nav-item !w-7 !h-7 text-coral hover:!text-coral-shadow"
