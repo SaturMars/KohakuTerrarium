@@ -28,6 +28,11 @@ After installation, all commands are available via `kt`.
 | `kt install <source>` | Install a creature/terrarium package |
 | `kt uninstall <name>` | Remove an installed package |
 | `kt edit <ref>` | Open a package config in your editor |
+| `kt extension list` | List installed extension modules |
+| `kt extension info <name>` | Show details of a package's extensions |
+| `kt web` | Serve web UI + API |
+| `kt app` | Launch native desktop UI |
+| `kt mcp list --agent <path>` | List MCP servers from agent config |
 | `kt info <path>` | Show agent config info |
 
 ## Authentication
@@ -38,7 +43,7 @@ After installation, all commands are available via `kt`.
 kt login <provider>
 ```
 
-Supported providers: `codex`, `openrouter`, `openai`, `anthropic`, `gemini`.
+Supported providers: `codex`, `openrouter`, `openai`, `anthropic`, `gemini`, `mimo`.
 
 **Codex** uses OAuth (opens a browser for ChatGPT login). After authenticating, agents with `auth_mode: codex-oauth` will use your ChatGPT Plus/Pro subscription. Tokens are saved to `~/.kohakuterrarium/codex-auth.json`.
 
@@ -464,6 +469,110 @@ kt edit kohaku-creatures/terrariums/novel
 ```
 
 The command locates the config file (`config.yaml`, `config.yml`, `terrarium.yaml`, or `terrarium.yml`) inside the resolved path and opens it.
+
+## Extension Management
+
+### `kt extension list` - List Extension Modules
+
+```bash
+kt extension list
+```
+
+Shows all installed extension modules (tools, plugins, LLM presets) from installed packages. For each package with extensions, displays the package name, version, and a summary of available module types.
+
+### `kt extension info` - Show Package Extension Details
+
+```bash
+kt extension info <name>
+```
+
+Display detailed information about a specific package's extension modules, including creatures, terrariums, tools, plugins, and LLM presets. Shows module names, descriptions, and source file paths.
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `name` | Yes | Package name (as shown in `kt extension list`) |
+
+**Example:**
+
+```bash
+kt extension info kohaku-creatures
+```
+
+## Web and Desktop
+
+### `kt web` - Serve Web UI + API
+
+```bash
+kt web [options]
+```
+
+Start the FastAPI server with the Vue 3 web dashboard. Provides REST and WebSocket endpoints for managing agents and terrariums, plus the frontend UI.
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `0.0.0.0` | Bind host |
+| `--port` | `8001` | Bind port |
+| `--dev` | off | API-only mode (run vite dev server separately for frontend development) |
+
+**Examples:**
+
+```bash
+# Start with defaults
+kt web
+
+# Custom port
+kt web --port 9000
+
+# Dev mode (API only, use vite for frontend)
+kt web --dev
+```
+
+### `kt app` - Launch Native Desktop UI
+
+```bash
+kt app [options]
+```
+
+Launch the web dashboard as a native desktop window using pywebview. Starts an internal FastAPI server and opens it in a native window.
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `8001` | Internal server port |
+
+**Example:**
+
+```bash
+kt app
+kt app --port 9000
+```
+
+## MCP (Model Context Protocol)
+
+### `kt mcp list` - List MCP Servers
+
+```bash
+kt mcp list --agent <agent_path>
+```
+
+List all MCP servers configured in an agent's config file.
+
+**Options:**
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--agent` | Yes | Path to agent config folder |
+
+**Example:**
+
+```bash
+kt mcp list --agent examples/agent-apps/swe_agent
+```
 
 ## Utility
 

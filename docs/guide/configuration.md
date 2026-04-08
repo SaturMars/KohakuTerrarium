@@ -193,8 +193,8 @@ tools:
 | `bash` | Execute shell commands | `think` | Extended reasoning step |
 | `python` | Execute Python code | `scratchpad` | Session key-value memory |
 | `read` | Read file contents | `send_message` | Send to named channel |
-| `write` | Create/overwrite files | `wait_channel` | Wait for channel message |
-| `edit` | Search-replace in files | `http` | Make HTTP requests |
+| `write` | Create/overwrite files | `web_fetch` | Fetch and read web pages |
+| `edit` | Search-replace in files | `web_search` | Search the web (DuckDuckGo) |
 | `glob` | Find files by pattern | `ask_user` | Prompt user for input |
 | `grep` | Regex search in files | `json_read` | Query JSON files |
 | `tree` | Directory structure | `json_write` | Modify JSON files |

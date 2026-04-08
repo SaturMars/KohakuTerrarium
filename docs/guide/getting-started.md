@@ -89,11 +89,17 @@ Create `examples/agent-apps/my_agent/config.yaml`:
 name: my_agent
 version: "1.0"
 
-# LLM Configuration (Codex OAuth - uses ChatGPT subscription)
+# LLM Configuration — profile-based (recommended)
+# Uses a named profile from presets or ~/.kohakuterrarium/llm_profiles.yaml
 controller:
-  model: gpt-5.4
-  auth_mode: codex-oauth
+  llm: gpt-5.4               # Profile name (run `kt model list` to see all)
   tool_format: native
+
+# Alternative: inline config (backward compatible)
+# controller:
+#   model: gpt-5.4
+#   auth_mode: codex-oauth    # Uses ChatGPT subscription
+#   tool_format: native
 
 # System prompt file
 system_prompt_file: prompts/system.md

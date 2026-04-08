@@ -158,3 +158,45 @@ When session recording is enabled (via `--session` flag or programmatic `attach_
 - Agent state (scratchpad, turn count)
 
 The recording is non-blocking and does not modify the processing loop. It uses the same secondary output pattern as the WebSocket `StreamOutput`. See [Environment-Session](environment.md) for the full isolation model.
+
+## Interrupt vs Cancel
+
+Interrupt and cancel are two distinct mechanisms with different scopes and behaviors.
+
+### Interrupt (Escape key / API interrupt endpoint)
+
+Interrupt stops the **main LLM generation** and any **direct tool tasks** that are currently awaited. It does NOT affect background jobs.
+
+What happens when interrupt fires:
+
+1. `_interrupt_requested` flag is set on the agent
+2. `_interrupted` flag is set on the controller (checked during LLM streaming)
+3. The `_processing_task` is cancelled via `asyncio.Task.cancel()`
+4. All running **direct** (non-background) tool tasks are cancelled
+5. Background sub-agents and background tools continue running undisturbed
+6. The agent returns to idle and awaits the next input
+
+Background sub-agents are NOT cancelled by interrupt. They have their own lifecycle and run independently of the main processing loop.
+
+### Individual Cancel (TUI running panel click / frontend X button / stop_task tool)
+
+Individual cancel targets a **specific job** by ID, whether it is a tool task or a sub-agent. The mechanism depends on the job type:
+
+- **Tool tasks**: The underlying `asyncio.Task` is cancelled directly via `task.cancel()`. This raises `CancelledError` in whatever the tool is awaiting.
+- **Sub-agents**: Cooperative cancellation via the `SubAgent.cancel()` method, which sets a `_cancelled` flag. The sub-agent checks this flag at three points:
+  1. Before each turn starts (between turns)
+  2. During LLM streaming (between chunks)
+  3. After tool execution completes (before processing results)
+
+When a sub-agent detects `_cancelled`, it returns a `SubAgentResult` with `success=False` and an error message indicating manual interruption. This cooperative approach ensures the sub-agent can clean up gracefully rather than being terminated mid-operation.
+
+### BackgroundifyHandle: Mid-Flight Promotion
+
+Direct tool tasks can be **promoted to background** while they are running, via `BackgroundifyHandle`. This is useful when a direct tool is taking longer than expected:
+
+- The TUI running panel or frontend can call `handle.promote()` on a waiting direct task
+- The awaiting code receives a `PromotionResult` placeholder instead of the real result
+- The task continues running in the background and fires `_on_bg_complete` when done
+- If the task completes before promotion, `promote()` returns `False` (no-op)
+
+This mechanism bridges the gap between direct and background execution modes, letting the agent continue processing without waiting for a slow tool.
