@@ -96,12 +96,7 @@ controller:
   api_key_env: OPENROUTER_API_KEY
 ```
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENROUTER_API_KEY` | Yes | API key for your LLM provider |
-| `OPENROUTER_MODEL` | No | Model override (creature configs have defaults) |
-
-Set these in a `.env` file at the project root, loaded by `python-dotenv`.
+API keys are managed via `kt login` and stored in `~/.kohakuterrarium/api_keys.yaml`. See [Getting Started](getting-started.md) for authentication setup.
 
 ## Running a Terrarium
 
