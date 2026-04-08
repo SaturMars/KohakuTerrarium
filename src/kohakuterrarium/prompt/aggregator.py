@@ -55,17 +55,15 @@ _EXECUTION_MODEL_DYNAMIC = """
 ## Execution Model
 
 - **Direct tools**: Results return after you finish your response
-- **Sub-agents**: Run in background — results delivered automatically in a later turn
+- **Sub-agents**: Run in background by default (set `run_in_background=false` to wait for result)
 - **Commands** (info, jobs, wait): Execute during your response
 
-### Background Tasks (Sub-agents)
+### Background Tasks
 
-When you dispatch a sub-agent, the task is **fully delegated**. The sub-agent works
-independently and the result arrives as a new message in a later turn.
+Sub-agents run in background by default. Tools can also run in background
+with `run_in_background=true`. Background results arrive automatically in a later turn.
 
-**Critical rule**: Once you delegate a task, do NOT do the same work yourself.
-If you ask a sub-agent to explore a codebase, do NOT start exploring it yourself.
-If you ask a sub-agent to research something, do NOT start researching it yourself.
+**Critical rule**: Once you delegate a task to background, do NOT do the same work yourself.
 The work is already being done — doing it again wastes tokens and produces duplicates.
 
 **Workflow example**:
@@ -74,15 +72,12 @@ The work is already being done — doing it again wastes tokens and produces dup
 3. **Stop your response and wait** — both are working in parallel
 4. Results arrive automatically → synthesize and continue
 
-**Mixing direct + background** (only on DIFFERENT tasks):
-1. Dispatch `explore` to investigate module A (background)
-2. Meanwhile, use `read` to examine **module B** yourself (a DIFFERENT file)
-3. Stop — explore result for module A arrives in next turn
+**Direct sub-agents** (set `run_in_background=false`):
+Use when you need the result before continuing and the task is short.
 
 **WRONG** (duplicate work):
 1. Dispatch `explore` to investigate the codebase ← background
 2. Start reading the same codebase yourself ← WRONG, same task!
-   → This wastes tokens. The explore agent is already doing this.
 
 IMPORTANT: When calling a function, output ONLY the function call block. Do not output any extra text, markers, or filler characters (like dashes, dots, etc.) before or after the function call. If you need results before continuing, end with the function call and nothing else.
 IMPORTANT: You may ONLY call functions listed in the "Available Functions" section above. Do NOT call functions that are not listed.
@@ -92,23 +87,21 @@ _EXECUTION_MODEL_STATIC = """
 ## Execution Model
 
 - **Direct tools**: Results return after you finish your response
-- **Sub-agents**: Run in background — results delivered automatically in a later turn
+- **Sub-agents**: Run in background by default (set `run_in_background=false` to wait)
 
-### Background Tasks (Sub-agents)
+### Background Tasks
 
-When you dispatch a sub-agent, the task is **fully delegated**. The sub-agent works
-independently and the result arrives as a new message in a later turn.
+Sub-agents run in background by default. Background results arrive automatically
+in a later turn.
 
-**Critical rule**: Once you delegate a task, do NOT do the same work yourself.
-If you ask a sub-agent to explore a codebase, do NOT start exploring it yourself.
-If you ask a sub-agent to research something, do NOT start researching it yourself.
+**Critical rule**: Once you delegate a task to background, do NOT do the same
+work yourself. The work is already being done.
 
 **Workflow**: dispatch sub-agents → do DIFFERENT direct work or stop and wait →
-results arrive automatically → continue with the results.
+results arrive automatically → continue.
 
-**WRONG**: dispatching a sub-agent to explore the codebase, then immediately
-exploring the same codebase yourself. That duplicates work and wastes tokens.
-Only do direct work on DIFFERENT tasks than what the sub-agent is handling.
+**Direct sub-agents**: Set `run_in_background=false` when you need the result
+before continuing and the task is short.
 
 IMPORTANT: When calling a function, output ONLY the function call block. Do not output any extra text, markers, or filler characters before or after. If you need results before continuing, end with the function call and nothing else.
 IMPORTANT: You may ONLY call functions listed in the "Available Functions" section above. Do NOT call functions that are not listed.
@@ -136,7 +129,7 @@ def _build_command_hints(tool_format: str) -> str:
         f"- Read docs: `{info_ex}`\n"
         f"- List jobs: `{jobs_ex}`\n"
         f"- Wait for job: `{wait_ex}`\n\n"
-        "Sub-agents run in background. Results arrive automatically.\n"
+        "Sub-agents run in background by default. Results arrive automatically.\n"
         "Use wait only if you must block until a specific job finishes."
     )
 
@@ -180,25 +173,20 @@ You WILL receive the result before your next turn.
 
 ### Background Execution
 
-Sub-agents always run in background. Tools can also run in background
-with the `run_in_background` parameter.
+Sub-agents run in background by default. Set `run_in_background=false`
+to wait for a sub-agent's result before continuing (use for short tasks).
+Tools can also run in background with `run_in_background=true`.
 
 When a task runs in background, the result arrives automatically in
 a later turn. You do NOT need to poll or wait.
 
-**Critical**: Once you delegate work to a background tool or sub-agent,
-do NOT do the same work yourself. The task is already being done.
-Doing it yourself wastes tokens and produces duplicate results.
+**Critical**: Once you delegate work to background, do NOT do the same
+work yourself. The task is already being done.
 
 **Example workflow**:
 1. Dispatch `explore` sub-agent to investigate module A (background)
 2. Use `read` on a DIFFERENT file (module B) yourself (direct)
 3. Stop — explore result for module A arrives in next turn
-4. Synthesize both results and continue
-
-**WRONG**: dispatching `explore` to investigate the codebase, then
-immediately reading the same codebase yourself. The explore agent
-is already doing that — you are duplicating work and wasting tokens.
 
 You may ONLY call tools listed in the "Available Functions" section above.
 """

@@ -299,7 +299,15 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
                         "task": {
                             "type": "string",
                             "description": "Task description for the sub-agent",
-                        }
+                        },
+                        "run_in_background": {
+                            "type": "boolean",
+                            "description": (
+                                "If true (default), run in background — result "
+                                "delivered later. If false, block and wait for "
+                                "the sub-agent to finish before continuing."
+                            ),
+                        },
                     },
                     "required": ["task"],
                 },
