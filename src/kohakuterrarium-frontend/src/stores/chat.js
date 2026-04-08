@@ -926,8 +926,8 @@ export const useChatStore = defineStore("chat", {
       if (!this._instanceId || !this._instanceType) return;
       try {
         const api = this._instanceType === "agent"
-          ? (await import("@/api")).agentAPI
-          : (await import("@/api")).terrariumAPI;
+          ? (await import("@/utils/api")).agentAPI
+          : (await import("@/utils/api")).terrariumAPI;
         if (this._instanceType === "agent") {
           await api.promote(this._instanceId, jobId);
         }
