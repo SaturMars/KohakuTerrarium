@@ -2,10 +2,12 @@
 
 import time
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
 from kohakuterrarium.api.deps import get_manager
+from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.resume import (
     detect_session_type,
     resume_agent,
@@ -229,3 +231,68 @@ async def resume_session(session_name: str):
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Resume failed: {e}")
+
+
+def _resolve_session_path(session_name: str) -> Path | None:
+    """Shared session file lookup (name, prefix, or full path)."""
+    for ext in (".kohakutr", ".kt"):
+        candidate = _SESSION_DIR / f"{session_name}{ext}"
+        if candidate.exists():
+            return candidate
+    matches = [
+        p
+        for p in list(_SESSION_DIR.glob("*.kohakutr")) + list(_SESSION_DIR.glob("*.kt"))
+        if p.stem == session_name
+        or p.stem.startswith(session_name)
+        or session_name in p.stem
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+@router.get("/{session_name}/memory/search")
+async def search_session_memory(
+    session_name: str,
+    q: str,
+    mode: str = "auto",
+    k: int = 10,
+    agent: str | None = None,
+) -> dict[str, Any]:
+    """Search a session's memory via FTS5 or semantic / hybrid modes.
+
+    Read-only. Wraps the existing ``SessionMemory.search()`` — no new
+    indexing behavior. Modes: ``auto`` (default), ``fts``, ``semantic``,
+    ``hybrid``.
+    """
+    path = _resolve_session_path(session_name)
+    if path is None:
+        raise HTTPException(404, f"Session not found: {session_name}")
+
+    try:
+        memory = SessionMemory(path)
+        results = memory.search(query=q, mode=mode, k=k, agent=agent)
+    except Exception as e:
+        raise HTTPException(500, f"Memory search failed: {e}")
+
+    return {
+        "session_name": path.stem,
+        "query": q,
+        "mode": mode,
+        "k": k,
+        "count": len(results),
+        "results": [
+            {
+                "content": r.content,
+                "round": r.round_num,
+                "block": r.block_num,
+                "agent": r.agent,
+                "block_type": r.block_type,
+                "score": r.score,
+                "ts": r.ts,
+                "tool_name": r.tool_name,
+                "channel": r.channel,
+            }
+            for r in results
+        ],
+    }
