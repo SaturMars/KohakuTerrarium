@@ -83,6 +83,7 @@ class TUISession:
         # Job cancel callback: Callable[[str, str], None] or None
         # Signature: (job_id, job_name) -> None
         self.on_cancel_job: Any = None
+        self.on_promote_job: Any = None
 
     def set_terrarium_tabs(self, tabs: list[str]) -> None:
         """Configure terrarium mode before start()."""
@@ -680,6 +681,7 @@ class TUISession:
         )
         self._app.tui_session = self
         self._app.on_cancel_job = self._handle_cancel_job
+        self._app.on_promote_job = self._handle_promote_job
         self.running = True
         self._stop_event.clear()
 
@@ -687,6 +689,11 @@ class TUISession:
         """Relay cancel request from the TUI app to the registered callback."""
         if self.on_cancel_job:
             self.on_cancel_job(job_id, job_name)
+
+    def _handle_promote_job(self, job_id: str) -> None:
+        """Relay [→bg] promote request from the TUI app to the registered callback."""
+        if self.on_promote_job:
+            self.on_promote_job(job_id)
 
     async def run_app(self) -> None:
         if not self._app:
