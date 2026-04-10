@@ -945,8 +945,8 @@ export const useChatStore = defineStore("chat", {
 
     /** Regenerate the last assistant response using current settings. */
     async regenerateLastResponse() {
-      if (!this._instanceId || this._instanceType !== "agent") {
-        console.warn("Regenerate only supported for agent instances currently");
+      if (!this._instanceId || this._instanceType === "terrarium") {
+        console.warn("Regenerate only supported for standalone creature instances currently");
         return;
       }
       try {
@@ -959,7 +959,7 @@ export const useChatStore = defineStore("chat", {
 
     /** Edit a user message and re-run from that point. */
     async editMessage(messageIdx, newContent) {
-      if (!this._instanceId || this._instanceType !== "agent") return;
+      if (!this._instanceId || this._instanceType === "terrarium") return;
       if (messageIdx == null) return;
       try {
         const { agentAPI } = await import("@/utils/api");
@@ -971,7 +971,7 @@ export const useChatStore = defineStore("chat", {
 
     /** Rewind conversation to a point (drop later messages). */
     async rewindTo(messageIdx) {
-      if (!this._instanceId || this._instanceType !== "agent") return;
+      if (!this._instanceId || this._instanceType === "terrarium") return;
       try {
         const { agentAPI } = await import("@/utils/api");
         await agentAPI.rewindTo(this._instanceId, messageIdx);
