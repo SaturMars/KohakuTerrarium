@@ -92,7 +92,6 @@ import MarkdownViewer from "@/components/panels/canvas/MarkdownViewer.vue";
 import { useCanvasStore } from "@/stores/canvas";
 
 const canvas = useCanvasStore();
-const chat = useChatStore();
 
 const viewerType = computed(() => canvas.activeArtifact?.type || "code");
 
